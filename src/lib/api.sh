@@ -21,17 +21,17 @@ _api_request() {
     _status=$(printf '%s\n' "$_out" | tail -n1 | tr -cd '0-9')
     _body=$(printf '%s\n' "$_out" | sed '$d')
     
-    if [ "$_status" = "429" ]; then
+    if [ "$_status" = "200" ] || [ "$_status" = "201" ]; then
+        printf '%s\n' "$_body"
+        return 0
+    elif [ "$_status" = "429" ]; then
         return 42
-    elif [ "$_status" -ge 400 ] 2>/dev/null; then
+    else
         if printf '%s\n' "$_body" | grep -q "MAX_DEVICES_REACHED"; then
             return 43
         fi
         return 1
     fi
-    
-    printf '%s\n' "$_body"
-    return 0
 }
 
 api_post_token() {

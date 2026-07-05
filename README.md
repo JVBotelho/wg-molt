@@ -48,6 +48,11 @@ Mullvad's advice is to log out and back in to rotate your key. Your router doesn
 
 This tool does not "fix" the correlation vulnerability, and it should never be described that way. Server-side mitigation is Mullvad's work, not this tool's, and roughly half the fleet is still unmitigated as of the date above. What `wg-molt` provides is key hygiene parity with the official app for the router use case — reducing the window a static key stays valid as a correlation target, nothing more. Overstating this would cost the one thing a security-adjacent tool actually needs: credibility.
 
+## Security
+
+- Account numbers and private keys are never logged and are read strictly from protected `chmod 600` files or standard input to avoid leaking secrets to process lists (`ps`).
+- **Known Platform Limitation (Asuswrt-Merlin):** Final persistence to flash memory uses the native `nvram` utility (`nvram set var=key`). Because Asuswrt's `nvram` binary does not support reading values from a file or `stdin`, the private key is inherently exposed via command-line arguments (`argv`) for a fraction of a second during the save operation. This is a documented, accepted risk since there is no alternative, and the risk is entirely local (restricted to other processes with root access on the router).
+
 ## Sources
 
 - Original research: <https://tmctmt.com/posts/mullvad-exit-ips-as-a-fingerprinting-vector/> (published 2026-05-14; mitigation update 2026-05-29)
