@@ -29,6 +29,18 @@ jobs:
             exit 1
           }
 
+      - name: Run Linting (shellcheck & checkbashisms)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck=0.9.0-1 devscripts
+          find . -type f -name "*.sh" -exec shellcheck --shell=sh {} +
+          find . -type f -name "*.sh" -exec checkbashisms {} +
+
+      - name: Run Unit Tests
+        run: |
+          cd test
+          sh run_tests.sh
+
       - name: Package Release
         id: package
         run: |
