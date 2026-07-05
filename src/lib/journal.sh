@@ -33,11 +33,14 @@ journal_write() {
     for _arg in "$@"; do
         _key="${_arg%%=*}"
         _val="${_arg#*=}"
-        
+        set -C
+        rm -f "$_tmp2"
         # Safely filter out the old key. Do NOT swallow errors (prevent data loss)
-        awk -v k="$_key" 'BEGIN{l=length(k)} substr($0,1,l+1) != k"=" {print}' "$_tmp" > "$_tmp2" || { umask "$_old_umask"; return 1; }
-        printf '%s=%s\n' "$_key" "$_val" >> "$_tmp2" || { umask "$_old_umask"; return 1; }
-        mv "$_tmp2" "$_tmp" || { umask "$_old_umask"; return 1; }
+        awk -v k="$_key" 'BEGIN{l=length(k)} substr($0,1,l+1) != k"=" {print}' "$_tmp" > "$_tmp2" || { set +C; rm -f "$_tmp2"; umask "$_old_umask"; return 1; }
+        printf '%s=%s\n' "$_key" "$_val" >> "$_tmp2" || { set +C; rm -f "$_tmp2"; umask "$_old_umask"; return 1; }
+        set +C
+        
+        mv "$_tmp2" "$_tmp" || { rm -f "$_tmp2"; umask "$_old_umask"; return 1; }
     done
     
     # Atomic replace

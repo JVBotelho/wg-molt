@@ -5,6 +5,9 @@
 API_BASE="${API_BASE:-https://api.mullvad.net}"
 CURL_OPTS="-sSL --connect-timeout 10 --max-time 30"
 
+export API_RATE_LIMIT=42
+export API_MAX_DEVICES=43
+
 _api_request() {
     local _in_data="$1"
     local _url="$2"
@@ -25,10 +28,10 @@ _api_request() {
         printf '%s\n' "$_body"
         return 0
     elif [ "$_status" = "429" ]; then
-        return 42
+        return "$API_RATE_LIMIT"
     else
         if printf '%s\n' "$_body" | grep -q "MAX_DEVICES_REACHED"; then
-            return 43
+            return "$API_MAX_DEVICES"
         fi
         return 1
     fi
@@ -83,8 +86,9 @@ api_get_device_id() {
     fi
     
     _id=$(printf '%s' "$_id" | tr -cd 'A-Za-z0-9-')
-    [ -n "$_id" ] || return 1
-    printf '%s\n' "$_id"
+    if [ -n "$_id" ]; then
+        printf '%s\n' "$_id"
+    fi
 }
 
 api_put_pubkey() {

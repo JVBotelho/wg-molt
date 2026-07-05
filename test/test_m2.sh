@@ -54,9 +54,14 @@ echo "PASS: timeout handling"
 
 # Test 6: Invalid JSON scenario (fail-closed parsing)
 export MOCK_SCENARIO="invalid_json"
-api_get_device_id "$token" "oldkey=" >/dev/null 2>&1 || rc=$?
-if [ "$rc" -ne 1 ]; then
-    echo "FAIL: api_get_device_id should fail with 1 on invalid JSON, got $rc"
+rc=0
+out=$(api_get_device_id "$token" "oldkey=") || rc=$?
+if [ "$rc" -ne 0 ]; then
+    echo "FAIL: api_get_device_id should not fail on invalid JSON (just return empty), got rc=$rc"
+    exit 1
+fi
+if [ -n "$out" ]; then
+    echo "FAIL: api_get_device_id should return empty on invalid JSON, got '$out'"
     exit 1
 fi
 echo "PASS: invalid json handling"

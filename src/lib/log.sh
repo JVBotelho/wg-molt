@@ -29,5 +29,14 @@ _log_write() {
     fi
 }
 
-log_info() { _log_write "INFO" "user.info" "$@"; }
-log_error() { _log_write "ERROR" "user.err" "$@"; }
+log_info() {
+    _log_write "INFO" "user.info" "$@"
+}
+
+log_warn() {
+    _log_write "WARN" "user.warning" "$@"
+}
+
+log_error() {
+    _log_write "ERROR" "user.err" "$@"
+}
