@@ -1,0 +1,24 @@
+# Test / Temp files
+/tmp/
+*.log
+*.tmp
+*.bak
+
+# Package files
+*.zip
+*.tar.gz
+
+# Local state / simulation files
+account.txt
+journal
+journal.priv
+state
+config
+/lock/
+
+# OS and IDE artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
