@@ -5,12 +5,18 @@
 set -e
 
 # Default paths
-BASE_DIR="${BASE_DIR:-/jffs/addons/mullvad-key-rotate}"
+BASE_DIR="${BASE_DIR:-/jffs/addons/wg-molt}"
 CONFIG_FILE="${CONFIG_FILE:-$BASE_DIR/config}"
 export JOURNAL_FILE="${JOURNAL_FILE:-$BASE_DIR/journal}"
 export LOCK_DIR="${LOCK_DIR:-$BASE_DIR/lock}"
 STATE_FILE="${STATE_FILE:-$BASE_DIR/state}"
 ACCOUNT_FILE=""
+
+# Ensure cleanup on exit
+trap 'rm -f "$JOURNAL_FILE.priv"' EXIT
+# Abort immediately on kill signals to trigger the EXIT trap
+trap 'exit 143' TERM
+trap 'exit 130' INT
 
 # Load libraries
 # shellcheck disable=SC1091
@@ -101,7 +107,8 @@ _check_age() {
     if [ "$_diff" -ge "$_rotate_sec" ]; then
         return 0
     fi
-    
+
+    log_info "Skipping rotation: last rotation was ${_diff}s ago, next due in $(( (_rotate_sec - _diff) / 3600 ))h."
     return 1 # Too young
 }
 
@@ -160,7 +167,7 @@ _reconcile() {
             return 1
         fi
     else
-        log_error "Failed to resolve devices during reconcile (HTTP $_rc)."
+        log_error "Failed to resolve devices during reconcile (code $_rc). See preceding API error line for the actual HTTP status."
         return 1
     fi
 }
@@ -179,7 +186,7 @@ _do_put_and_apply() {
         if [ "$_rc" -eq 43 ]; then
             log_error "Max devices reached! Account limit exceeded."
         else
-            log_error "PUT pubkey failed (HTTP $_rc) after retries."
+            log_error "PUT pubkey failed after retries (code $_rc). See preceding API error line for the actual HTTP status."
         fi
         return 1
     fi
@@ -199,9 +206,11 @@ _do_put_and_apply() {
     rm -f "$_priv_file"
     ( umask 077 && set -C && printf '%s\n' "$_priv" > "$_priv_file" )
     
+    local _apply_time
     local _apply_ok=0
     local _i=0
     while [ "$_i" -lt 3 ]; do
+        _apply_time=$(date +%s)
         if platform_apply_runtime "$_priv_file" "$_ipv4" "$_ipv6"; then
             _apply_ok=1
             break
@@ -210,13 +219,13 @@ _do_put_and_apply() {
         sleep 2
         _i=$((_i + 1))
     done
-    
+
     local _verify_ok=0
     if [ "$_apply_ok" -eq 1 ]; then
-        if verify_tunnel "$WG_UNIT"; then
+        if verify_tunnel "$WG_UNIT" "$_apply_time"; then
             _verify_ok=1
         else
-            log_error "Verification failed after 3 retries. Proceeding to persist anyway (forward recovery)."
+            log_error "Verification failed after retries. Proceeding to persist anyway (forward recovery)."
         fi
     else
         log_error "Apply failed after 3 retries. Proceeding to persist anyway (forward recovery)."
@@ -233,8 +242,8 @@ _do_put_and_apply() {
     
     if [ "$_apply_ok" -eq 0 ] || [ "$_verify_ok" -eq 0 ]; then
         log_warn "Triggering aggressive restart of WireGuard client (forward recovery step 3)..."
-        if command -v service >/dev/null 2>&1; then
-            service restart_wgc || true
+        if which service >/dev/null 2>&1; then
+            service "restart_${WG_UNIT}" || true
         fi
         if [ -n "$NOTIFY_HOOK" ] && [ -x "$NOTIFY_HOOK" ]; then
             "$NOTIFY_HOOK" "WG Rotation Failed" "Forward recovery in progress for $WG_UNIT" || true
@@ -252,10 +261,20 @@ _do_put_and_apply() {
 
 main() {
     local _reconcile_only=0
+    local _dry_run=0
+    local _force=0
     local _rc
-    if [ "$1" = "--reconcile-only" ]; then
-        _reconcile_only=1
-    fi
+    local arg
+
+    for arg in "$@"; do
+        if [ "$arg" = "--reconcile-only" ]; then
+            _reconcile_only=1
+        elif [ "$arg" = "--dry-run" ]; then
+            _dry_run=1
+        elif [ "$arg" = "--force" ]; then
+            _force=1
+        fi
+    done
 
     _load_config || exit 1
     
@@ -268,7 +287,12 @@ main() {
     fi
     
     # Check for orphaned journal
-    if [ -f "$JOURNAL_FILE" ]; then
+    if [ -e "$JOURNAL_FILE" ]; then
+        if [ "$_dry_run" -eq 1 ]; then
+            log_error "Cannot perform dry-run with pending journal."
+            journal_unlock
+            exit 1
+        fi
         _reconcile
         _rc=$?
         if [ "$_reconcile_only" -eq 1 ]; then
@@ -293,15 +317,19 @@ main() {
         exit 0
     fi
     
-    if ! _check_age; then
-        journal_unlock
-        exit 0
+    if [ "$_force" -eq 1 ]; then
+        log_info "Forcing rotation (--force): skipping age check."
+    elif [ "$_dry_run" -eq 0 ]; then
+        if ! _check_age; then
+            journal_unlock
+            exit 0
+        fi
     fi
     
     log_info "Starting Mullvad WireGuard key rotation..."
     
     # Preflight
-    if ! command -v wg >/dev/null || ! command -v curl >/dev/null; then
+    if ! which wg >/dev/null || ! which curl >/dev/null; then
         log_error "Preflight failed: wg or curl not found."
         journal_unlock
         exit 1
@@ -347,7 +375,11 @@ main() {
         exit 1
     fi
     
-    journal_write "fase=KEYED" "privkey_nova=$_priv" "pubkey_nova=$_pub" "pubkey_antiga=$_old_pubkey"
+    if [ "$_dry_run" -eq 1 ]; then
+        log_info "DRY-RUN: Skipping journal write (fase=KEYED)."
+    else
+        journal_write "fase=KEYED" "privkey_nova=$_priv" "pubkey_nova=$_pub" "pubkey_antiga=$_old_pubkey"
+    fi
     
     # Auth
     local _account _token
@@ -366,6 +398,12 @@ main() {
         log_error "Failed to resolve device by pubkey."
         journal_unlock
         exit 1
+    fi
+    
+    if [ "$_dry_run" -eq 1 ]; then
+        log_info "DRY-RUN completed successfully. Aborting before API and router mutation."
+        journal_unlock
+        exit 0
     fi
     
     journal_write "fase=PUT_SENT"

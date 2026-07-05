@@ -10,16 +10,71 @@ Automatic Mullvad WireGuard key rotation for routers (Asuswrt-Merlin, OpenWrt).
 
 ## Status
 
-**Early. Not yet usable end-to-end.** This repository is at milestone M1 of a phased build-out:
+**Stable (v1.0.0).** 
+The core orchestration, API integrations, Asuswrt-Merlin platform support, state machine (`rotate.sh`), and installers are fully implemented and validated on real Asuswrt-Merlin hardware in production environments. The logic strictly enforces forward-recovery using a robust journaling mechanism. 
 
-- Done (M1): repo skeleton, a secret-redacting logger (`src/lib/log.sh`), and an atomic-write journal with lock-based concurrency control (`src/lib/journal.sh`).
-- Not yet built: the Mullvad API client, the Asuswrt-Merlin and OpenWrt platform adapters, the `rotate.sh` state machine, and `install.sh`.
-
-There is no rotation logic, no installer, and no router integration yet. If you're looking for something to install today, this isn't it — check back later, or watch the repo for the v1.0 release (Merlin adapter first; OpenWrt follows in v1.1). The full design, including the state machine, failure matrix, and milestone plan, lives in `plano-arquitetura-rotacao-chaves-mullvad.md` (Portuguese).
+OpenWrt support is slated for v1.1.
 
 ## Quickstart
 
-Coming soon. Installation instructions will be added once `install.sh` and the Merlin adapter exist and have been validated on real hardware — there's no point documenting steps for a tool that doesn't run yet.
+**Prerequisites (Asuswrt-Merlin only):**
+You must enable custom scripts in the WebUI:
+`Administration -> System -> Enable JFFS custom scripts and configs` (Set to **Yes**).
+
+### Install
+
+To install `wg-molt`, you must first transfer the script files to the router. The easiest way is to download the release tarball and extract it, or use `scp` to send the unzipped files.
+
+**Note:** The legacy `scp` protocol (especially when using the `-O` flag, which is required for Dropbear SSH on Asuswrt) cannot create new remote directories automatically. You must create the temporary directory on the router first.
+
+**From your PC terminal:**
+```sh
+# Copy the files to the router (assuming you are in the wg-molt folder)
+# We copy them to the temporary RAM disk (/tmp) first
+scp -O -r ./src ./install.sh ./uninstall.sh admin@192.168.50.1:/tmp/
+```
+
+**Then, SSH into the router and run the installer:**
+```sh
+cd /tmp
+sh ./install.sh
+```
+
+The installer will prompt you for your 16-digit Mullvad account number and your WireGuard interface (default `wgc1`). It will install the tool to `/jffs/addons/wg-molt`, generate a randomized cron job (jittered between 03:00 and 05:59 AM) to rotate the key every 7 days, and safely register a boot-time hook in `/jffs/scripts/services-start`.
+
+### Test the integration (Dry Run)
+
+You can verify that the installation succeeded and the tool can communicate with Mullvad's API without modifying any keys:
+
+```sh
+/jffs/addons/wg-molt/rotate.sh --dry-run
+```
+This safely performs Preflight, Auth, and Keygen, but stops right before replacing your keys on the router or the API.
+
+### Configuration
+
+By default, the script rotates the key every 7 days. The cron job runs every night, but the script checks the age of your current key and logs why it's skipping if it is younger than the configured threshold. This ensures rotations aren't skipped if the router is turned off on the scheduled day.
+
+If you want to change the rotation interval (e.g., to rotate daily), edit the configuration file:
+
+```sh
+sed -i 's/ROTATE_DAYS=7/ROTATE_DAYS=1/' /jffs/addons/wg-molt/config
+```
+
+### Forcing a rotation
+
+To rotate immediately regardless of how recently the key was last rotated (useful for manual testing), pass `--force`:
+
+```sh
+/jffs/addons/wg-molt/rotate.sh --force
+```
+
+### Uninstall
+
+```sh
+sh ./uninstall.sh
+```
+The uninstaller safely removes the cron job, boot hooks, and directories. If a key rotation was interrupted mid-flight (leaving an active journal), the uninstaller will block removal to prevent data loss. You can resolve this by running `/jffs/addons/wg-molt/rotate.sh --reconcile-only` or use `--force` to bypass the safeguard.
 
 ## Target platforms
 

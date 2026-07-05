@@ -5,8 +5,8 @@
 API_BASE="${API_BASE:-https://api.mullvad.net}"
 CURL_OPTS="-sSL --connect-timeout 10 --max-time 30"
 
-export API_RATE_LIMIT=42
-export API_MAX_DEVICES=43
+export API_RATE_LIMIT=142
+export API_MAX_DEVICES=143
 
 _api_request() {
     local _in_data="$1"
@@ -28,10 +28,16 @@ _api_request() {
         printf '%s\n' "$_body"
         return 0
     elif [ "$_status" = "429" ]; then
-        return "$API_RATE_LIMIT"
+        return 142
     else
         if printf '%s\n' "$_body" | grep -q "MAX_DEVICES_REACHED"; then
-            return "$API_MAX_DEVICES"
+            return 143
+        fi
+        # Surface the real status/body for diagnostics -- callers only see a
+        # generic rc=1, which on its own tells you nothing about what Mullvad
+        # actually rejected. Guarded: api.sh must not assume log.sh is loaded.
+        if command -v log_error >/dev/null 2>&1; then
+            log_error "Mullvad API request failed: HTTP ${_status:-unknown} - $(printf '%s' "$_body" | tr '\n' ' ' | cut -c1-200)"
         fi
         return 1
     fi
@@ -46,7 +52,7 @@ api_post_token() {
     _rc=$?
     [ "$_rc" -eq 0 ] || return "$_rc"
     
-    if command -v jq >/dev/null 2>&1; then
+    if which jq >/dev/null 2>&1; then
         _token=$(printf '%s\n' "$_res" | jq -r '.access_token // empty')
     else
         _token=$(printf '%s\n' "$_res" | sed -n 's/.*"access_token"[ \t]*:[ \t]*"\([^"]*\)".*/\1/p')
@@ -68,7 +74,7 @@ api_get_device_id() {
     _rc=$?
     [ "$_rc" -eq 0 ] || return "$_rc"
         
-    if command -v jq >/dev/null 2>&1; then
+    if which jq >/dev/null 2>&1; then
         _id=$(printf '%s\n' "$_res" | jq -r --arg pk "$_pubkey" '.[] | select(.pubkey == $pk) | .id // empty')
     else
         _id=$(printf '%s\n' "$_res" | pk="$_pubkey" awk '
@@ -103,7 +109,7 @@ api_put_pubkey() {
     _rc=$?
     [ "$_rc" -eq 0 ] || return "$_rc"
         
-    if command -v jq >/dev/null 2>&1; then
+    if which jq >/dev/null 2>&1; then
         _ipv4=$(printf '%s\n' "$_res" | jq -r '.ipv4_address // empty')
         _ipv6=$(printf '%s\n' "$_res" | jq -r '.ipv6_address // empty')
     else
@@ -111,8 +117,8 @@ api_put_pubkey() {
         _ipv6=$(printf '%s\n' "$_res" | sed -n 's/.*"ipv6_address"[ \t]*:[ \t]*"\([^"]*\)".*/\1/p')
     fi
     
-    _ipv4=$(printf '%s' "$_ipv4" | tr -cd '0-9.')
-    _ipv6=$(printf '%s' "$_ipv6" | tr -cd '0-9a-fA-F:')
+    _ipv4=$(printf '%s' "$_ipv4" | sed 's/\/.*//' | tr -cd '0-9.')
+    _ipv6=$(printf '%s' "$_ipv6" | sed 's/\/.*//' | tr -cd '0-9a-fA-F:')
     
     [ -n "$_ipv4" ] || return 1
     

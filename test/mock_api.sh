@@ -70,6 +70,10 @@ curl() {
                 return 0
             fi
             ;;
+        "generic_error")
+            printf '{"error":"ROTATION_TOO_FREQUENT"}\n409\n'
+            return 0
+            ;;
     esac
     
     if echo "$_url" | grep -q "auth/v1/token"; then

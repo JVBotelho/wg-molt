@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  attestations: write
+  id-token: write
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify Tag is on Main Branch
+        run: |
+          git fetch origin main
+          git merge-base --is-ancestor $GITHUB_SHA origin/main || {
+            echo "Error: Tag must be on the main branch."
+            exit 1
+          }
+
+      - name: Package Release
+        id: package
+        run: |
+          mkdir build
+          
+          # Force reproducible timestamps on files before packing
+          find src/ install.sh uninstall.sh README.md LICENSE -exec touch -t 202601010000 {} +
+          
+          # Deterministic packaging flags (GZIP=-n removes gzip wrapper timestamp)
+          GZIP=-n tar --sort=name --mtime="2026-01-01 00:00:00Z" --owner=0 --group=0 --numeric-owner \
+              -czf build/wg-molt.tar.gz src/ install.sh uninstall.sh README.md LICENSE
+          
+          # Install zip
+          sudo apt-get update && sudo apt-get install -y zip
+          
+          # Zip after touch is now deterministic (assuming no extended attributes changing)
+          find src/ install.sh uninstall.sh README.md LICENSE | sort | TZ=UTC zip -X -@ build/wg-molt.zip
+          
+          cd build
+          sha256sum wg-molt.tar.gz wg-molt.zip > SHA256SUMS
+          cd ..
+
+      - name: Packaging Smoke Test
+        run: |
+          mkdir smoke-test
+          tar -xzf build/wg-molt.tar.gz -C smoke-test
+          cd smoke-test
+          
+          # Assert expected files
+          [ -f "install.sh" ] || { echo "install.sh missing"; exit 1; }
+          [ -f "README.md" ] || { echo "README.md missing"; exit 1; }
+          [ -f "LICENSE" ] || { echo "LICENSE missing"; exit 1; }
+          
+          # Assert forbidden files
+          ! find . -name ".git" | grep -q . || { echo ".git leaked"; exit 1; }
+          ! find . -name "test" | grep -q . || { echo "test dir leaked"; exit 1; }
+          ! find . -name ".github" | grep -q . || { echo ".github dir leaked"; exit 1; }
+          
+          # Assert scripts are still valid POSIX
+          sudo apt-get update && sudo apt-get install -y shellcheck=0.9.0-1
+          find . -type f -name "*.sh" -exec shellcheck --shell=sh {} +
+
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@92c65d2898f1f53cfdc910b962cecff86e7f8fcc # v1
+        with:
+          subject-path: "build/*"
+
+      - name: Generate Release Notes
+        id: release_notes
+        run: |
+          cat << 'EOF' > release_body.md
+          ## Asuswrt-Merlin Only
+          This release currently only targets Asuswrt-Merlin routers. OpenWrt support is planned for v1.1.
+          
+          ## About wg-molt
+          `wg-molt` provides automatic key rotation parity with the official Mullvad app for router environments, mitigating static correlation handles across VPN sessions.
+          
+          - **Research reference:** [tmctmt research](https://tmctmt.com/posts/mullvad-exit-ips-as-a-fingerprinting-vector/)
+          - **Mullvad Mitigation Status:** [Rollout Status](https://mullvad.net/help/exit-ip-vpn-servers-mitigation-rollout)
+          
+          ## Integrity
+          Archives are cryptographically attested via GitHub Build Provenance. Verify the `SHA256SUMS` file below.
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: |
+            build/wg-molt.tar.gz
+            build/wg-molt.zip
+            build/SHA256SUMS
+          body_path: release_body.md
+          draft: false
+          prerelease: false

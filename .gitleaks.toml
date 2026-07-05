@@ -1,0 +1,17 @@
+title = "wg-molt gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Allowlist mock API keys and tokens used in test fixtures"
+regexes = [
+    "mva_mock123",
+    "oldkey=",
+    "newkey=",
+    "otherkey=",
+    "oldpubkey=",
+    "newpubkey=",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+]

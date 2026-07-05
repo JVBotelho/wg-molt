@@ -74,6 +74,7 @@ log_error() {
 # Source the merlin module
 # shellcheck disable=SC1091
 export WG_UNIT="wgc1"
+# shellcheck disable=SC1091
 . ../src/platform/merlin.sh
 
 echo "Running M3 tests (Merlin platform)..."
@@ -145,7 +146,7 @@ sed -i 's|/jffs/scripts/services-start|/tmp/services-start|g' /tmp/merlin_test.s
 . /tmp/merlin_test.sh
 platform_schedule "install" "/path/to/rotate.sh"
 
-if ! grep -q "CRU a wg-molt-cron " /tmp/cru_cmds; then
+if ! grep -q "CRU a wg-molt " /tmp/cru_cmds; then
     echo "FAIL: cru a failed"
     exit 1
 fi

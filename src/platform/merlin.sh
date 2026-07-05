@@ -83,8 +83,8 @@ platform_apply_runtime() {
     ip -4 addr add "$_ipv4/32" dev "$WG_UNIT" || return 1
     
     if [ -n "$_ipv6" ]; then
-        ip -6 addr flush dev "$WG_UNIT"
-        ip -6 addr add "$_ipv6/128" dev "$WG_UNIT" || return 1
+        ip -6 addr flush dev "$WG_UNIT" 2>/dev/null || true
+        ip -6 addr add "$_ipv6/128" dev "$WG_UNIT" 2>/dev/null || true
     fi
 }
 
@@ -122,34 +122,40 @@ platform_persist_config() {
 platform_schedule() {
     local _action="$1"
     local _script_path="$2"
-    local _cron_name="wg-molt-cron"
-    local _services_start="/jffs/scripts/services-start"
+    local _cron_name="wg-molt"
+    local _services_start="${SVC_START:-/jffs/scripts/services-start}"
     
     if [ "$_action" = "install" ]; then
-        local _min
-        _min=$(awk 'BEGIN{srand(); print int(rand()*60)}')
+        local _seed _min _hr
+        _seed=$(awk '{print int($1*100)}' /proc/uptime 2>/dev/null)
+        if [ -z "$_seed" ]; then
+            _seed=$(date +%N 2>/dev/null | sed 's/^0*//' || echo "12345")
+        fi
+        _min=$(awk -v s="$_seed" 'BEGIN{srand(s); print int(rand()*60)}')
+        _hr=$(awk -v s="$_seed" 'BEGIN{srand(s+1); print int(rand()*3) + 3}')
         
-        cru a "$_cron_name" "$_min 3 * * * '$_script_path'"
+        local _cron_job="$_min $_hr * * * \"$_script_path\""
+        
+        cru a "$_cron_name" "$_cron_job"
         
         if [ ! -f "$_services_start" ]; then
             echo "#!/bin/sh" > "$_services_start"
-            chmod +x "$_services_start"
+            chmod a+rx "$_services_start"
         fi
         
-        sed -i '/# wg-molt begin/,/# wg-molt end/d' "$_services_start"
+        # Remove old block first
+        sed -i '/# --- BEGIN wg-molt ---/d; /cru a wg-molt/d; /rotate\.sh.*--reconcile-only/d; /# --- END wg-molt ---/d' "$_services_start"
         
-        # Ensure newline before appending block
-        echo "" >> "$_services_start"
         cat <<EOF >> "$_services_start"
-# wg-molt begin
-cru a "$_cron_name" "$_min 3 * * * '$_script_path'"
+# --- BEGIN wg-molt ---
+cru a wg-molt "$_cron_job"
 "$_script_path" --reconcile-only &
-# wg-molt end
+# --- END wg-molt ---
 EOF
     elif [ "$_action" = "remove" ]; then
-        cru d "$_cron_name" 2>/dev/null || true
+        cru d "$_cron_name" >/dev/null 2>&1 || true
         if [ -f "$_services_start" ]; then
-            sed -i '/# wg-molt begin/,/# wg-molt end/d' "$_services_start"
+            sed -i '/# --- BEGIN wg-molt ---/d; /cru a wg-molt/d; /rotate\.sh.*--reconcile-only/d; /# --- END wg-molt ---/d' "$_services_start"
         fi
     fi
 }

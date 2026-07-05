@@ -7,8 +7,19 @@ LOCK_DIR="${LOCK_DIR:-/tmp/wg-molt.lock}"
 
 journal_lock() {
     if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-        return 1
+        local _pid
+        _pid=$(cat "$LOCK_DIR/pid" 2>/dev/null) || true
+        # If there is a PID but the process is dead, the lock is stale
+        if [ -n "$_pid" ] && ! kill -0 "$_pid" 2>/dev/null; then
+            rm -rf "$LOCK_DIR"
+            if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+                return 1
+            fi
+        else
+            return 1
+        fi
     fi
+    echo "$$" > "$LOCK_DIR/pid"
     return 0
 }
 

@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & SAST
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Linting Tools
+        run: |
+          sudo apt-get update
+          # Pin shellcheck and install devscripts
+          sudo apt-get install -y shellcheck=0.9.0-1 devscripts
+          
+      - name: Run shellcheck (Strict POSIX)
+        run: |
+          find . -type f -name "*.sh" -exec shellcheck --shell=sh {} +
+
+      - name: Run checkbashisms
+        run: |
+          find . -type f -name "*.sh" -exec checkbashisms {} +
+
+  secrets:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@dcedce43c6f43de0b836d1fe38946645c9c638dc # v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Run test suite via Docker
+        run: |
+          cd test
+          sh run_tests.sh

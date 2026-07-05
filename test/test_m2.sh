@@ -3,8 +3,13 @@ set -e
 
 cd "$(dirname "$0")"
 
+export LOG_FILE="/tmp/wg-molt-m2-test.log"
+rm -f "$LOG_FILE"
+
 # shellcheck disable=SC1091
 . ./mock_api.sh
+# shellcheck disable=SC1091
+. ../src/lib/log.sh
 # shellcheck disable=SC1091
 . ../src/lib/api.sh
 
@@ -69,8 +74,8 @@ echo "PASS: invalid json handling"
 # Test 7: API returns 429
 export MOCK_SCENARIO="429"
 api_put_pubkey "$token" "dev-001" "newkey=" >/dev/null 2>&1 || rc=$?
-if [ "$rc" -ne 42 ]; then
-    echo "FAIL: api_put_pubkey should fail with 42 on 429, got $rc"
+if [ "$rc" -ne 142 ]; then
+    echo "FAIL: api_put_pubkey should fail with 142 on 429, got $rc"
     exit 1
 fi
 echo "PASS: 429 handling"
@@ -78,10 +83,24 @@ echo "PASS: 429 handling"
 # Test 8: API returns MAX_DEVICES_REACHED
 export MOCK_SCENARIO="max_devices"
 api_put_pubkey "$token" "dev-001" "newkey=" >/dev/null 2>&1 || rc=$?
-if [ "$rc" -ne 43 ]; then
-    echo "FAIL: api_put_pubkey should fail with 43 on max devices, got $rc"
+if [ "$rc" -ne 143 ]; then
+    echo "FAIL: api_put_pubkey should fail with 143 on max devices, got $rc"
     exit 1
 fi
 echo "PASS: max devices handling"
+
+# Test 9: Generic non-mapped error (e.g. 409) surfaces real status, not just rc=1
+export MOCK_SCENARIO="generic_error"
+rc=0
+api_put_pubkey "$token" "dev-001" "newkey=" >/dev/null 2>&1 || rc=$?
+if [ "$rc" -ne 1 ]; then
+    echo "FAIL: api_put_pubkey should fail with generic rc=1 on unmapped status, got $rc"
+    exit 1
+fi
+if ! grep -q "HTTP 409" "$LOG_FILE"; then
+    echo "FAIL: generic API failure should log the real HTTP status (409), got: $(cat "$LOG_FILE")"
+    exit 1
+fi
+echo "PASS: generic error surfaces real HTTP status"
 
 echo "ALL M2 TESTS PASSED"
